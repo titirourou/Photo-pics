@@ -59,19 +59,34 @@ async function generateThumbnail(sourcePath: string, filename: string): Promise<
   const thumbnailPath = join(THUMBNAILS_DIR, thumbnailFilename);
   
   try {
+    // Get image metadata first
+    const metadata = await sharp(sourcePath).metadata();
+    const aspectRatio = metadata.width! / metadata.height!;
+    
+    // Calculate dimensions maintaining aspect ratio
+    let width = 600;
+    let height = Math.round(width / aspectRatio);
+    
+    // If height is too extreme, adjust dimensions
+    if (height > 800) {
+      height = 800;
+      width = Math.round(height * aspectRatio);
+    }
+
     await sharp(sourcePath)
-      .resize(300, 300, {
-        fit: 'cover',
-        position: 'attention'
+      .resize(width, height, {
+        fit: 'inside',
+        withoutEnlargement: true
       })
       .jpeg({ quality: 80 })
       .toFile(thumbnailPath);
   } catch (error) {
     console.error('Error generating thumbnail:', error);
+    // Fallback to a default thumbnail
     await sharp({
       create: {
-        width: 300,
-        height: 300,
+        width: 600,
+        height: 400,
         channels: 3,
         background: { r: 200, g: 200, b: 200 }
       }
@@ -100,6 +115,26 @@ async function processDirectory(dirPath: string, isExternal: boolean = false, su
   if (relativePath) {
     const pathParts = relativePath.split('/');
     const name = pathParts[pathParts.length - 1];
+    
+    // Ensure all parent folders exist in the database
+    let currentPath = '';
+    for (let i = 0; i < pathParts.length - 1; i++) {
+      const part = pathParts[i];
+      const parentPath = currentPath || '/';
+      currentPath = currentPath ? `${currentPath}/${part}` : part;
+      
+      // Create parent folder if it doesn't exist
+      await Folder.findOneAndUpdate(
+        { path: currentPath },
+        {
+          name: part,
+          parentPath: parentPath,
+        },
+        { upsert: true }
+      );
+    }
+
+    // Create or update the current folder
     const parentPath = pathParts.length > 1 
       ? pathParts.slice(0, -1).join('/')
       : '/';
@@ -134,12 +169,8 @@ async function processDirectory(dirPath: string, isExternal: boolean = false, su
       if (await isValidImageFile(entry.name)) {
         const stats = await stat(fullPath);
         
-        let filePath: string;
-        if (isExternal) {
-          filePath = await copyFileToLibrary(fullPath, subfolderPath);
-        } else {
-          filePath = relative(PHOTOS_ROOT, fullPath);
-        }
+        // For external files, use the original path instead of copying
+        const filePath = isExternal ? fullPath : relative(PHOTOS_ROOT, fullPath);
         
         const thumbnailPath = await generateThumbnail(fullPath, entry.name);
 
@@ -159,26 +190,6 @@ async function processDirectory(dirPath: string, isExternal: boolean = false, su
   }
 }
 
-async function copyFileToLibrary(sourcePath: string, subfolderPath: string = ''): Promise<string> {
-  const filename = basename(sourcePath);
-  const destinationDir = subfolderPath ? join(PHOTOS_ROOT, subfolderPath) : PHOTOS_ROOT;
-  await ensureDirectoryExists(destinationDir);
-  const destinationPath = join(destinationDir, filename);
-  
-  const image = await sharp(sourcePath).toBuffer();
-  await sharp(image).toFile(destinationPath);
-  
-  return relative(PHOTOS_ROOT, destinationPath);
-}
-
-async function ensureDirectoryExists(dir: string) {
-  try {
-    await stat(dir);
-  } catch (error) {
-    await mkdir(dir, { recursive: true });
-  }
-}
-
 export async function POST(request: NextRequest) {
   try {
     const { path, isExternal = false } = await request.json();
@@ -192,15 +203,20 @@ export async function POST(request: NextRequest) {
 
     await connectDB();
 
-    const processPath = isExternal ? path : join(PHOTOS_ROOT, path);
-    const baseFolderName = isExternal ? basename(processPath) : '';
-    await processDirectory(processPath, isExternal, baseFolderName);
+    // Clean up old folders before syncing
+    if (!isExternal) {
+      console.log('Cleaning up old folders...');
+      await Folder.deleteMany({});
+    }
 
-    return NextResponse.json({ message: 'Sync completed successfully' });
+    console.log('Starting directory processing...');
+    await processDirectory(path, isExternal);
+    
+    return NextResponse.json({ success: true });
   } catch (error) {
     console.error('Error in POST /api/sync:', error);
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'Internal Server Error' },
+      { error: 'Internal Server Error' },
       { status: 500 }
     );
   }

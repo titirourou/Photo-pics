@@ -1,54 +1,81 @@
 'use client';
 
-import { useState } from "react"
-import Sidebar from "@/components/Sidebar"
-import ImageGrid from "@/components/ImageGrid"
-import TopBar from "@/components/TopBar"
+import Link from 'next/link';
+import { useSession } from 'next-auth/react';
+import { UserIcon, Cog6ToothIcon } from '@heroicons/react/24/outline';
+import { useRouter } from 'next/navigation';
+import { useEffect } from 'react';
 
 export default function Home() {
-  const [selectedFolder, setSelectedFolder] = useState<string | null>(null);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [refreshTrigger, setRefreshTrigger] = useState(0);
-  const [isUserView] = useState(false); // TODO: Replace with actual auth check
+  const { data: session, status } = useSession();
+  const router = useRouter();
 
-  const handleFolderSelect = (path: string) => {
-    setSelectedFolder(path);
-    setSearchQuery('');
-  };
+  useEffect(() => {
+    // If user is already logged in, redirect them to their appropriate page
+    if (status === 'authenticated') {
+      if (session.user?.isAdmin) {
+        router.push('/admin');
+      } else {
+        router.push('/user');
+      }
+    }
+  }, [session, status, router]);
 
-  const handleSearch = (query: string) => {
-    setSearchQuery(query);
-    setSelectedFolder(null);
-  };
-
-  const handleKeywordsUpdated = () => {
-    setRefreshTrigger(prev => prev + 1);
-  };
+  // Show loading state while checking session
+  if (status === 'loading') {
+    return (
+      <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center">
+        <div className="text-gray-600 dark:text-gray-400">Loading...</div>
+      </div>
+    );
+  }
 
   return (
-    <main className="flex h-screen overflow-hidden">
-      <Sidebar
-        selectedFolder={selectedFolder}
-        onFolderSelect={handleFolderSelect}
-        isUserView={isUserView}
-        onKeywordsUpdated={handleKeywordsUpdated}
-      />
-      <div className="flex-1 flex flex-col overflow-hidden">
-        <TopBar
-          searchQuery={searchQuery}
-          onSearch={handleSearch}
-          selectedFolder={selectedFolder}
-          isUserView={isUserView}
-        />
-        <div className="flex-1 overflow-y-auto p-6">
-          <ImageGrid
-            selectedFolder={selectedFolder}
-            searchQuery={searchQuery}
-            isUserView={isUserView}
-            refreshTrigger={refreshTrigger}
-          />
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center">
+      <div className="max-w-2xl mx-auto px-4 text-center">
+        <h1 className="text-4xl font-bold text-gray-900 dark:text-white mb-8">
+          PHOTO-KEY
+        </h1>
+        <p className="text-lg text-gray-600 dark:text-gray-400 mb-12">
+          Welcome to your photo library management system
+        </p>
+        
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <Link
+            href="/user"
+            className="group relative bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6 hover:shadow-xl transition-all duration-200"
+          >
+            <div className="absolute -top-6 left-1/2 -translate-x-1/2 bg-primary rounded-full p-3">
+              <UserIcon className="w-6 h-6 text-white" />
+            </div>
+            <h2 className="text-xl font-semibold text-gray-900 dark:text-white mt-4 mb-2">
+              User Access
+            </h2>
+            <p className="text-gray-600 dark:text-gray-400 text-sm">
+              Browse and search through your photo collection
+            </p>
+          </Link>
+
+          <Link
+            href="/admin"
+            className="group relative bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6 hover:shadow-xl transition-all duration-200"
+          >
+            <div className="absolute -top-6 left-1/2 -translate-x-1/2 bg-primary rounded-full p-3">
+              <Cog6ToothIcon className="w-6 h-6 text-white" />
+            </div>
+            <h2 className="text-xl font-semibold text-gray-900 dark:text-white mt-4 mb-2">
+              Admin Access
+            </h2>
+            <p className="text-gray-600 dark:text-gray-400 text-sm">
+              Manage collections, keywords, and system settings
+            </p>
+          </Link>
+        </div>
+
+        <div className="mt-12 text-sm text-gray-500 dark:text-gray-400">
+          Sign in with your @chalktalksports.com email to continue
         </div>
       </div>
-    </main>
+    </div>
   );
 } 

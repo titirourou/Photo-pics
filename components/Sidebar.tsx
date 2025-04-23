@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { FolderIcon, ChevronRightIcon, EllipsisHorizontalIcon, XMarkIcon, Cog6ToothIcon } from '@heroicons/react/24/outline';
+import { FolderIcon, ChevronRightIcon, EllipsisHorizontalIcon, XMarkIcon, Cog6ToothIcon, TagIcon } from '@heroicons/react/24/outline';
 import { cn } from '@/lib/utils';
 import Link from 'next/link';
 
@@ -12,13 +12,23 @@ interface FolderNode {
 
 interface SidebarProps {
   selectedFolder: string | null;
-  onFolderSelect: (path: string) => void;
-  isUserView?: boolean;
+  onFolderSelect: (path: string | null) => void;
+  searchQuery: string;
+  onSearch: (query: string) => void;
+  isUserView: boolean;
   onKeywordsUpdated?: () => void;
   className?: string;
 }
 
-export default function Sidebar({ selectedFolder, onFolderSelect, isUserView = false, onKeywordsUpdated, className }: SidebarProps) {
+export default function Sidebar({
+  selectedFolder,
+  onFolderSelect,
+  searchQuery,
+  onSearch,
+  isUserView,
+  onKeywordsUpdated,
+  className
+}: SidebarProps) {
   const [folderTree, setFolderTree] = useState<FolderNode[]>([]);
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
   const [activeMenu, setActiveMenu] = useState<string | null>(null);
@@ -26,10 +36,45 @@ export default function Sidebar({ selectedFolder, onFolderSelect, isUserView = f
   const [selectedFolderPath, setSelectedFolderPath] = useState<string | null>(null);
   const [keywordInput, setKeywordInput] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [showRemoveDialog, setShowRemoveDialog] = useState(false);
+  const [folderToRemove, setFolderToRemove] = useState<string | null>(null);
+  const [lastSyncTime, setLastSyncTime] = useState<string>('');
+  const [isMounted, setIsMounted] = useState(false);
 
   useEffect(() => {
+    setIsMounted(true);
     fetchFolders();
   }, []);
+
+  // Add periodic check for changes
+  useEffect(() => {
+    if (isUserView) return; // Only check for changes in admin view
+
+    const checkForChanges = async () => {
+      try {
+        const response = await fetch('/api/sync/check');
+        if (!response.ok) throw new Error('Failed to check for changes');
+        const data = await response.json();
+        
+        if (data.success) {
+          console.log('Sync completed successfully');
+          await fetchFolders();
+          setLastSyncTime(new Date().toLocaleTimeString());
+        }
+      } catch (error) {
+        console.error('Error checking for changes:', error);
+      }
+    };
+
+    // Initial check and time set
+    setLastSyncTime(new Date().toLocaleTimeString());
+    checkForChanges();
+
+    // Check for changes every 30 seconds
+    const interval = setInterval(checkForChanges, 30000);
+
+    return () => clearInterval(interval);
+  }, [isUserView]);
 
   const fetchFolders = async () => {
     try {
@@ -109,7 +154,42 @@ export default function Sidebar({ selectedFolder, onFolderSelect, isUserView = f
     e.preventDefault();
     e.stopPropagation();
     setActiveMenu(null);
-    // TODO: Implement remove folder confirmation
+    setFolderToRemove(path);
+    setShowRemoveDialog(true);
+  };
+
+  const confirmRemoveFolder = async () => {
+    if (!folderToRemove) return;
+    
+    try {
+      const response = await fetch('/api/folders', {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          folderPath: folderToRemove,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to remove folder');
+      }
+
+      // Refresh the folder tree
+      await fetchFolders();
+      
+      // Notify parent component if the selected folder was removed
+      if (selectedFolder === folderToRemove) {
+        onFolderSelect(null);
+      }
+      
+      setShowRemoveDialog(false);
+      setFolderToRemove(null);
+    } catch (error) {
+      console.error('Error removing folder:', error);
+      alert('Failed to remove folder. Please try again.');
+    }
   };
 
   const renderFolder = (folder: FolderNode, level: number = 0) => {
@@ -121,6 +201,13 @@ export default function Sidebar({ selectedFolder, onFolderSelect, isUserView = f
     return (
       <div key={folder._id} className="relative">
         <div className="flex items-center relative group hover:bg-gray-50 dark:hover:bg-gray-700">
+          {/* Indentation and vertical lines */}
+          {level > 0 && (
+            <div className="absolute h-full" style={{ left: `${level * 16}px` }}>
+              <div className="absolute h-full w-px bg-gray-200 dark:bg-gray-700" />
+            </div>
+          )}
+          
           <button
             onClick={() => {
               onFolderSelect(folder.path);
@@ -131,8 +218,9 @@ export default function Sidebar({ selectedFolder, onFolderSelect, isUserView = f
             className={cn(
               "flex-1 flex items-center h-8 text-sm transition-colors pr-8",
               isSelected ? "text-primary dark:text-primary" : "text-gray-700 dark:text-gray-300",
-              level > 0 && "ml-5"
+              level > 0 && `pl-${level * 4 + 4}`
             )}
+            style={{ paddingLeft: level > 0 ? `${level * 16 + 16}px` : undefined }}
           >
             <div className="flex items-center min-w-0">
               {hasChildren && (
@@ -186,16 +274,8 @@ export default function Sidebar({ selectedFolder, onFolderSelect, isUserView = f
           )}
         </div>
 
-        {/* Vertical connection line */}
-        {level > 0 && (
-          <div className="absolute left-2 top-0 h-8 w-px bg-gray-200 dark:bg-gray-700" />
-        )}
-
         {isExpanded && hasChildren && (
           <div className="relative">
-            {level > 0 && (
-              <div className="absolute left-2 top-0 h-full w-px bg-gray-200 dark:bg-gray-700" />
-            )}
             <div className="pt-1">
               {folder.children.map(child => renderFolder(child, level + 1))}
             </div>
@@ -217,130 +297,44 @@ export default function Sidebar({ selectedFolder, onFolderSelect, isUserView = f
   }, [activeMenu]);
 
   return (
-    <div className={`w-[300px] h-full overflow-y-auto border-r border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 flex-shrink-0 flex flex-col ${className}`}>
-      {/* Logo container */}
+    <div className={`w-64 bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 flex flex-col ${className}`}>
       <div className="h-[75px] flex items-center px-6 border-b border-gray-200 dark:border-gray-700">
         <h1 className="text-xl font-semibold text-gray-900 dark:text-white">PHOTO-KEY</h1>
       </div>
 
-      {/* Folder tree */}
       <div className="flex-1 p-4 overflow-y-auto">
-        {folderTree.map((folder) => (
-          <div key={folder.path} className="mb-2">
-            <button
-              onClick={() => {
-                onFolderSelect(folder.path);
-                if (folder.children.length > 0) {
-                  toggleFolder(folder.path);
-                }
-              }}
-              className={`w-full text-left flex items-center gap-2 px-3 py-2 rounded-lg transition-colors ${
-                selectedFolder === folder.path
-                  ? 'bg-primary/10 text-primary dark:bg-primary/20'
-                  : 'hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300'
-              }`}
-            >
-              <FolderIcon className={`h-5 w-5 ${
-                selectedFolder === folder.path
-                  ? 'text-primary'
-                  : 'text-gray-400 dark:text-gray-500'
-              }`} />
-              <span>{folder.name}</span>
-              {!isUserView && (
-                <button
-                  onClick={(e) => handleMenuClick(e, folder.path)}
-                  className="ml-auto p-1 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600"
-                >
-                  <EllipsisHorizontalIcon className="h-5 w-5 text-gray-500 dark:text-gray-400" />
-                </button>
-              )}
-            </button>
-
-            {/* Folder actions menu */}
-            {activeMenu === folder.path && !isUserView && (
-              <div className="absolute mt-1 w-48 bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 py-1 z-20">
-                <button
-                  onClick={(e) => handleAddKeywords(e, folder.path)}
-                  className="w-full px-4 py-2 text-left text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700"
-                >
-                  Add Keywords
-                </button>
-                <button
-                  onClick={(e) => handleRemoveFolder(e, folder.path)}
-                  className="w-full px-4 py-2 text-left text-red-600 dark:text-red-400 hover:bg-gray-100 dark:hover:bg-gray-700"
-                >
-                  Remove Folder
-                </button>
-              </div>
-            )}
-
-            {/* Render children recursively */}
-            {folder.children && folder.children.length > 0 && (
-              <div className="ml-4 mt-2 border-l border-gray-200 dark:border-gray-700">
-                {folder.children.map((child) => (
-                  <div key={child.path} className="mb-2">
-                    <button
-                      onClick={() => {
-                        onFolderSelect(child.path);
-                        if (child.children.length > 0) {
-                          toggleFolder(child.path);
-                        }
-                      }}
-                      className={`w-full text-left flex items-center gap-2 px-3 py-2 rounded-lg transition-colors ${
-                        selectedFolder === child.path
-                          ? 'bg-primary/10 text-primary dark:bg-primary/20'
-                          : 'hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300'
-                      }`}
-                    >
-                      <FolderIcon className={`h-5 w-5 ${
-                        selectedFolder === child.path
-                          ? 'text-primary'
-                          : 'text-gray-400 dark:text-gray-500'
-                      }`} />
-                      <span>{child.name}</span>
-                      {!isUserView && (
-                        <button
-                          onClick={(e) => handleMenuClick(e, child.path)}
-                          className="ml-auto p-1 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600"
-                        >
-                          <EllipsisHorizontalIcon className="h-5 w-5 text-gray-500 dark:text-gray-400" />
-                        </button>
-                      )}
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
+        {!isUserView && isMounted && lastSyncTime && (
+          <div className="mb-4 text-xs text-gray-500 dark:text-gray-400">
+            Last checked: {lastSyncTime}
           </div>
-        ))}
+        )}
+        {folderTree.map(folder => renderFolder(folder))}
       </div>
 
-      {/* Admin link */}
       {!isUserView && (
         <div className="p-4 border-t border-gray-200 dark:border-gray-700">
           <Link
-            href="/admin/sync"
+            href="/admin/settings"
             className="flex items-center gap-2 text-gray-700 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white"
           >
             <Cog6ToothIcon className="h-5 w-5" />
-            <span>Manage Collections</span>
+            <span>Settings</span>
           </Link>
         </div>
       )}
 
-      {/* Keyword Modal */}
       {keywordModalOpen && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg p-6 w-96 relative">
+          <div className="bg-white dark:bg-gray-800 rounded-lg p-6 w-96 relative">
             <button
               onClick={() => setKeywordModalOpen(false)}
-              className="absolute top-4 right-4 text-gray-500 hover:text-gray-700"
+              className="absolute top-4 right-4 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300"
             >
               <XMarkIcon className="w-5 h-5" />
             </button>
             
-            <h3 className="text-lg font-semibold mb-4">Add Keywords</h3>
-            <p className="text-sm text-gray-600 mb-4">
+            <h3 className="text-lg font-semibold mb-4 text-gray-900 dark:text-white">Add Keywords</h3>
+            <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
               Enter keywords separated by commas. These keywords will be applied to all files in this folder and its subfolders.
             </p>
             
@@ -349,27 +343,50 @@ export default function Sidebar({ selectedFolder, onFolderSelect, isUserView = f
               value={keywordInput}
               onChange={(e) => setKeywordInput(e.target.value)}
               placeholder="e.g., nature, landscape, summer"
-              className="w-full px-3 py-2 border border-gray-300 rounded-md mb-4 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+              className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md mb-4 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
             />
             
-            <div className="flex justify-end space-x-3">
+            <div className="flex justify-end gap-2">
               <button
                 onClick={() => setKeywordModalOpen(false)}
-                className="px-4 py-2 text-sm text-gray-600 hover:text-gray-800"
+                className="px-4 py-2 text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white"
               >
                 Cancel
               </button>
               <button
                 onClick={handleSubmitKeywords}
-                disabled={isSubmitting || !keywordInput.trim()}
-                className={cn(
-                  "px-4 py-2 text-sm text-white rounded-md",
-                  isSubmitting || !keywordInput.trim()
-                    ? "bg-gray-400 cursor-not-allowed"
-                    : "bg-primary hover:bg-primary/90"
-                )}
+                disabled={isSubmitting}
+                className="px-4 py-2 bg-primary text-white rounded-md hover:bg-primary/90 disabled:opacity-50"
               >
-                {isSubmitting ? "Adding..." : "Add Keywords"}
+                {isSubmitting ? 'Adding...' : 'Add Keywords'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showRemoveDialog && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white dark:bg-gray-800 rounded-lg p-6 w-96">
+            <h3 className="text-lg font-semibold mb-2 text-gray-900 dark:text-white">Remove Folder</h3>
+            <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
+              Are you sure you want to remove this folder and all its contents? This action cannot be undone.
+            </p>
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => {
+                  setShowRemoveDialog(false);
+                  setFolderToRemove(null);
+                }}
+                className="px-4 py-2 text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmRemoveFolder}
+                className="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700"
+              >
+                Remove
               </button>
             </div>
           </div>

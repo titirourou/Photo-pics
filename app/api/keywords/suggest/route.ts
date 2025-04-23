@@ -1,76 +1,30 @@
 import { NextRequest, NextResponse } from 'next/server';
 import connectDB from '@/lib/mongodb';
-import File from '@/models/File';
-import { PipelineStage } from 'mongoose';
+import Keyword from '@/models/Keyword';
 
 export async function GET(request: NextRequest) {
   try {
     const searchParams = request.nextUrl.searchParams;
-    const query = searchParams.get('q');
+    const query = searchParams.get('query');
 
     if (!query) {
-      return NextResponse.json(
-        { error: 'Query parameter is required' },
-        { status: 400 }
-      );
+      return NextResponse.json([]);
     }
 
     await connectDB();
 
-    // Split the query into words and get the last word (being typed)
-    const words = query.split(' ');
-    const lastWord = words[words.length - 1];
-    const previousWords = words.slice(0, -1);
+    // Find keywords that match the query
+    const keywords = await Keyword.find({
+      value: {
+        $regex: query,
+        $options: 'i'
+      }
+    })
+      .sort({ count: -1 }) // Sort by usage count
+      .limit(10) // Limit to 10 suggestions
+      .select('value count');
 
-    // Build the aggregation pipeline
-    const pipeline: PipelineStage[] = [];
-
-    // If we have previous words, first match documents containing all of them
-    if (previousWords.length > 0) {
-      const previousConditions = previousWords.map(word => ({
-        keywords: {
-          $regex: word,
-          $options: 'i'
-        }
-      }));
-
-      pipeline.push({
-        $match: {
-          $and: previousConditions
-        }
-      });
-    }
-
-    // Then get unique keywords that match the last word
-    pipeline.push(
-      { $unwind: '$keywords' },
-      {
-        $match: {
-          keywords: {
-            $regex: lastWord,
-            $options: 'i'
-          }
-        }
-      },
-      {
-        $group: {
-          _id: '$keywords',
-          count: { $sum: 1 }
-        }
-      },
-      { $sort: { count: -1, _id: 1 } },
-      { $limit: 10 }
-    );
-
-    const files = await File.aggregate(pipeline);
-
-    const suggestions = files.map(file => ({
-      keyword: file._id,
-      count: file.count,
-      fullQuery: [...previousWords, file._id].join(' ')
-    }));
-
-    return NextResponse.json(suggestions);
+    return NextResponse.json(keywords);
   } catch (error) {
     console.error('Error in GET /api/keywords/suggest:', error);
     return NextResponse.json(

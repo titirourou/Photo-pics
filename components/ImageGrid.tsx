@@ -13,26 +13,39 @@ interface ImageFile {
   filename: string;
   path: string;
   thumbnailPath: string;
-  keywords: string[];
+  keywords: Array<{
+    _id: string;
+    value: string;
+  }>;
 }
 
 interface ImageGridProps {
   selectedFolder: string | null;
   searchQuery: string;
-  isUserView?: boolean;
-  refreshTrigger?: number;
+  isUserView: boolean;
+  refreshTrigger: number;
+  onKeywordsUpdated: () => void;
+  onClearSearch?: () => void;
 }
 
-export default function ImageGrid({ selectedFolder, searchQuery, isUserView = false, refreshTrigger = 0 }: ImageGridProps) {
+export default function ImageGrid({
+  selectedFolder,
+  searchQuery,
+  isUserView,
+  refreshTrigger,
+  onKeywordsUpdated,
+  onClearSearch
+}: ImageGridProps) {
   const [images, setImages] = useState<ImageFile[]>([]);
   const [selectedImage, setSelectedImage] = useState<ImageFile | null>(null);
   const [selectedImageIndex, setSelectedImageIndex] = useState<number>(-1);
   const [isAdmin] = useState(true); // TODO: Replace with actual auth check
   const [newKeyword, setNewKeyword] = useState('');
   const [showKeywordInput, setShowKeywordInput] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [showModal, setShowModal] = useState(false);
 
   useEffect(() => {
     if (selectedImage) {
@@ -43,39 +56,30 @@ export default function ImageGrid({ selectedFolder, searchQuery, isUserView = fa
 
   useEffect(() => {
     setError(null);
-    if (selectedFolder) {
-      fetchImages();
-    } else if (searchQuery) {
-      searchImages();
-    }
+    loadImages();
   }, [selectedFolder, searchQuery, refreshTrigger]);
 
-  const fetchImages = async () => {
-    if (!selectedFolder) return;
-    
-    setLoading(true);
+  const loadImages = async () => {
+    setIsLoading(true);
     try {
-      const response = await fetch(`/api/folder?path=${encodeURIComponent(selectedFolder)}`);
+      let url;
+      if (searchQuery) {
+        // When searching, always search globally (no folder filter)
+        url = `/api/search?keyword=${encodeURIComponent(searchQuery)}`;
+      } else {
+        // When not searching, show folder contents or root
+        url = selectedFolder
+          ? `/api/folder?path=${encodeURIComponent(selectedFolder)}`
+          : '/api/folder?path=/';
+      }
+
+      const response = await fetch(url);
       if (!response.ok) throw new Error('Failed to fetch images');
       const data = await response.json();
       setImages(data);
     } catch (error) {
-      console.error('Error fetching images:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const searchImages = async () => {
-    try {
-      setIsLoading(true);
-      const response = await fetch(`/api/search?keyword=${encodeURIComponent(searchQuery)}`);
-      if (!response.ok) throw new Error('Failed to search images');
-      const data = await response.json();
-      setImages(data);
-    } catch (error) {
-      setError('Error searching images. Please try again.');
-      console.error('Error searching images:', error);
+      console.error('Error loading images:', error);
+      setImages([]);
     } finally {
       setIsLoading(false);
     }
@@ -137,6 +141,7 @@ export default function ImageGrid({ selectedFolder, searchQuery, isUserView = fa
       setSelectedImage(prev => prev ? { ...prev, keywords: updatedImage.keywords } : null);
       setNewKeyword('');
       setShowKeywordInput(false);
+      onKeywordsUpdated();
     } catch (error) {
       console.error('Error adding keyword:', error);
       alert('Failed to add keyword. Please try again.');
@@ -181,16 +186,48 @@ export default function ImageGrid({ selectedFolder, searchQuery, isUserView = fa
   }
 
   const breakpointColumns = {
-    default: 5,
-    1536: 4,
-    1280: 3,
-    1024: 3,
-    768: 2,
-    640: 1
+    default: 6, // Maximum columns for very large screens (>1920px)
+    1920: 5,   // 5 columns for 1920px screens
+    1536: 4,   // 4 columns for 1536px screens
+    1280: 3,   // 3 columns for 1280px screens
+    1024: 2,   // 2 columns for 1024px screens
+    768: 2,    // 2 columns for tablets
+    640: 1     // 1 column for mobile
   };
 
   return (
     <div className="space-y-4">
+      {/* Search Results Header */}
+      {searchQuery && (
+        <div className="bg-white dark:bg-gray-800 rounded-lg p-4 shadow-sm border border-gray-200 dark:border-gray-700 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-medium text-gray-500 dark:text-gray-400">
+              Search results for:
+            </span>
+            <div className="flex flex-wrap gap-2">
+              {searchQuery.split(' ').map((term, index) => (
+                <span
+                  key={index}
+                  className="px-2 py-1 bg-primary/10 text-primary rounded-full text-sm font-medium"
+                >
+                  {term}
+                </span>
+              ))}
+            </div>
+            <span className="text-sm text-gray-500 dark:text-gray-400 ml-2">
+              ({images.length} {images.length === 1 ? 'result' : 'results'})
+            </span>
+          </div>
+          <button
+            onClick={onClearSearch}
+            className="flex items-center gap-1 px-3 py-1.5 text-sm text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-full transition-colors"
+          >
+            <XMarkIcon className="h-4 w-4" />
+            Clear search
+          </button>
+        </div>
+      )}
+
       <Masonry
         breakpointCols={breakpointColumns}
         className="flex -ml-4 w-auto"
@@ -204,11 +241,14 @@ export default function ImageGrid({ selectedFolder, searchQuery, isUserView = fa
           >
             <div className="relative">
               <Image
-                src={`/api/thumbnail?path=${encodeURIComponent(image.thumbnailPath)}`}
+                src={`/api/thumbnail?path=${encodeURIComponent(image.path)}`}
                 alt={image.filename}
-                width={600}
-                height={600}
-                className="w-full h-auto object-cover rounded-lg transition-transform duration-200 group-hover:scale-105"
+                width={1200}
+                height={800}
+                className="w-full rounded-lg transition-transform duration-200 group-hover:scale-105"
+                sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, (max-width: 1280px) 33vw, (max-width: 1536px) 25vw, (max-width: 1920px) 20vw, 16vw"
+                style={{ height: 'auto' }}
+                priority={false}
               />
               <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors duration-200" />
               
@@ -221,14 +261,14 @@ export default function ImageGrid({ selectedFolder, searchQuery, isUserView = fa
                 <ArrowDownTrayIcon className="w-4 h-4 text-white" />
               </button>
 
-              {image.keywords.length > 0 && (
+              {(image.keywords?.length ?? 0) > 0 && (
                 <div className="absolute bottom-2 left-2 right-2 flex flex-wrap gap-1">
                   {image.keywords.slice(0, 3).map((keyword, index) => (
                     <span
                       key={index}
                       className="bg-black/50 backdrop-blur-sm text-white text-xs px-2 py-1 rounded-full"
                     >
-                      {keyword}
+                      {keyword?.value || ''}
                     </span>
                   ))}
                   {image.keywords.length > 3 && (
@@ -280,17 +320,17 @@ export default function ImageGrid({ selectedFolder, searchQuery, isUserView = fa
             </div>
 
             {/* Info Sidebar */}
-            <div className="w-80 bg-white shadow-xl flex flex-col max-h-[99vh]">
-              <div className="p-4 border-b relative">
-                <h2 className="pr-8 font-medium truncate">
+            <div className="w-80 bg-white dark:bg-gray-800 shadow-xl flex flex-col max-h-[99vh]">
+              <div className="p-4 border-b border-gray-200 dark:border-gray-700 relative">
+                <h2 className="pr-8 font-medium truncate text-gray-900 dark:text-white">
                   {selectedImage?.filename}
                 </h2>
                 <button
                   onClick={() => setSelectedImage(null)}
-                  className="absolute top-3 right-3 p-1.5 hover:bg-gray-100 rounded-full transition-colors"
+                  className="absolute top-3 right-3 p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-full transition-colors"
                   aria-label="Close modal"
                 >
-                  <XMarkIcon className="w-5 h-5 text-gray-500" />
+                  <XMarkIcon className="w-5 h-5 text-gray-500 dark:text-gray-400" />
                 </button>
               </div>
 
@@ -298,7 +338,7 @@ export default function ImageGrid({ selectedFolder, searchQuery, isUserView = fa
                 <div className="space-y-4">
                   <div>
                     <div className="flex items-center justify-between mb-2">
-                      <h3 className="font-medium text-gray-700">Keywords</h3>
+                      <h3 className="font-medium text-gray-700 dark:text-gray-200">Keywords</h3>
                       {!isUserView && !showKeywordInput && (
                         <Button
                           variant="ghost"
@@ -321,7 +361,7 @@ export default function ImageGrid({ selectedFolder, searchQuery, isUserView = fa
                             value={newKeyword}
                             onChange={(e) => setNewKeyword(e.target.value)}
                             placeholder="Add keyword..."
-                            className="h-8 text-sm"
+                            className="h-8 text-sm dark:bg-gray-700 dark:text-white dark:placeholder-gray-400"
                             autoFocus
                           />
                           <Button
@@ -337,24 +377,24 @@ export default function ImageGrid({ selectedFolder, searchQuery, isUserView = fa
                     )}
 
                     <div className="flex flex-wrap gap-1.5">
-                      {selectedImage?.keywords.map((keyword, index) => (
+                      {selectedImage?.keywords?.map((keyword, index) => (
                         <Badge
                           key={index}
                           variant="secondary"
-                          className="text-sm"
+                          className="text-sm dark:bg-gray-700 dark:text-gray-200"
                         >
-                          {keyword}
+                          {keyword?.value || ''}
                         </Badge>
                       ))}
-                      {selectedImage?.keywords.length === 0 && (
-                        <p className="text-sm text-gray-400">No keywords added yet</p>
+                      {(!selectedImage?.keywords || selectedImage.keywords.length === 0) && (
+                        <p className="text-sm text-gray-400 dark:text-gray-500">No keywords added yet</p>
                       )}
                     </div>
                   </div>
                 </div>
               </div>
 
-              <div className="p-4 border-t">
+              <div className="p-4 border-t border-gray-200 dark:border-gray-700">
                 <Button
                   className="w-full"
                   onClick={() => selectedImage && downloadImage(selectedImage)}

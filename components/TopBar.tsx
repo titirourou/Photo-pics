@@ -1,6 +1,9 @@
 import { useState, useEffect } from 'react';
-import { MagnifyingGlassIcon, XMarkIcon, SunIcon, MoonIcon } from '@heroicons/react/24/outline';
+import { MagnifyingGlassIcon, XMarkIcon, SunIcon, MoonIcon, ArrowRightOnRectangleIcon } from '@heroicons/react/24/outline';
 import { useTheme } from 'next-themes';
+import { useRouter } from 'next/navigation';
+import { cn } from '@/lib/utils';
+import { signOut } from 'next-auth/react';
 
 interface TopBarProps {
   searchQuery: string;
@@ -9,14 +12,15 @@ interface TopBarProps {
   isUserView?: boolean;
 }
 
-interface Suggestion {
-  keyword: string;
+interface KeywordSuggestion {
+  _id: string;
+  value: string;
   count: number;
-  fullQuery: string;
 }
 
 export default function TopBar({ searchQuery, onSearch, selectedFolder, isUserView = false }: TopBarProps) {
-  const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
+  const router = useRouter();
+  const [suggestions, setSuggestions] = useState<KeywordSuggestion[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [inputValue, setInputValue] = useState('');
   const [selectedKeywords, setSelectedKeywords] = useState<string[]>([]);
@@ -26,7 +30,8 @@ export default function TopBar({ searchQuery, onSearch, selectedFolder, isUserVi
   // Initialize selected keywords from searchQuery
   useEffect(() => {
     if (searchQuery) {
-      setSelectedKeywords(searchQuery.split(' ').filter(k => k.trim()));
+      const keywords = searchQuery.split(' ').filter(k => k.trim());
+      setSelectedKeywords(keywords);
       setInputValue('');
     } else {
       setSelectedKeywords([]);
@@ -39,65 +44,76 @@ export default function TopBar({ searchQuery, onSearch, selectedFolder, isUserVi
     setMounted(true);
   }, []);
 
-  // Function to fetch suggestions
-  const fetchSuggestions = async (query: string) => {
-    if (!query.trim()) {
+  const fetchSuggestions = async (value: string) => {
+    if (!value.trim()) {
       setSuggestions([]);
       return;
     }
 
     try {
-      const response = await fetch(`/api/keywords/suggest?q=${encodeURIComponent(query)}`);
-      if (!response.ok) throw new Error('Failed to fetch suggestions');
-      const data = await response.json();
-      setSuggestions(data);
+      const response = await fetch(`/api/keywords/suggest?query=${encodeURIComponent(value)}`);
+      if (response.ok) {
+        const data = await response.json();
+        setSuggestions(data);
+      }
     } catch (error) {
       console.error('Error fetching suggestions:', error);
-      setSuggestions([]);
     }
   };
-
-  // Debounce the fetch suggestions function
-  useEffect(() => {
-    const timeoutId = setTimeout(() => {
-      fetchSuggestions(inputValue);
-    }, 300);
-
-    return () => clearTimeout(timeoutId);
-  }, [inputValue]);
 
   const handleInputChange = (value: string) => {
     setInputValue(value);
-    if (!value.trim()) {
+    fetchSuggestions(value);
+  };
+
+  const addKeyword = (keyword: string) => {
+    if (!selectedKeywords.includes(keyword)) {
+      const newKeywords = [...selectedKeywords, keyword];
+      setSelectedKeywords(newKeywords);
+      onSearch(newKeywords.join(' '));
+      setInputValue('');
       setSuggestions([]);
     }
   };
 
-  const removeKeyword = (keywordToRemove: string) => {
-    const newKeywords = selectedKeywords.filter(k => k !== keywordToRemove);
+  const removeKeyword = (keyword: string) => {
+    const newKeywords = selectedKeywords.filter(k => k !== keyword);
     setSelectedKeywords(newKeywords);
     onSearch(newKeywords.join(' '));
   };
 
+  const clearSearch = () => {
+    setSelectedKeywords([]);
+    setInputValue('');
+    setSuggestions([]);
+    onSearch(''); // This will clear the search in the parent component
+  };
+
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Backspace' && !inputValue && selectedKeywords.length > 0) {
-      // Remove the last tag when backspace is pressed and input is empty
-      const newKeywords = selectedKeywords.slice(0, -1);
-      setSelectedKeywords(newKeywords);
-      onSearch(newKeywords.join(' '));
+    if (e.key === 'Enter' && inputValue.trim()) {
+      addKeyword(inputValue.trim());
     }
+  };
+
+  const handleSignOut = async () => {
+    await signOut({ callbackUrl: '/' });
   };
 
   if (!mounted) {
     return null;
   }
 
+  const isSearchActive = selectedKeywords.length > 0 || inputValue.trim().length > 0;
+
   return (
     <div className="sticky top-0 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700 z-10">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
         <div className="max-w-3xl mx-auto flex items-center justify-between">
           <div className="flex-1 max-w-2xl relative">
-            <div className="relative flex items-center flex-wrap gap-2 min-h-[42px] pl-10 pr-4 py-1 border border-gray-300 dark:border-gray-600 rounded-lg focus-within:ring-2 focus-within:ring-primary focus-within:border-transparent dark:bg-gray-800">
+            <div className={cn(
+              "relative flex items-center flex-wrap gap-2 min-h-[42px] pl-10 pr-4 py-1 border rounded-lg focus-within:ring-2 focus-within:ring-primary focus-within:border-transparent dark:bg-gray-800",
+              isSearchActive ? "border-primary" : "border-gray-300 dark:border-gray-600"
+            )}>
               <MagnifyingGlassIcon className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-gray-400" />
               
               {/* Selected keyword tags */}
@@ -127,42 +143,62 @@ export default function TopBar({ searchQuery, onSearch, selectedFolder, isUserVi
                 placeholder={selectedKeywords.length === 0 ? "Search photos by keywords..." : ""}
                 className="flex-1 min-w-[150px] outline-none bg-transparent dark:text-white dark:placeholder-gray-400"
               />
+
+              {/* Clear search button */}
+              {isSearchActive && (
+                <button
+                  onClick={clearSearch}
+                  className="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-full transition-colors"
+                  title="Clear search"
+                  type="button"
+                >
+                  <XMarkIcon className="h-5 w-5 text-gray-400" />
+                </button>
+              )}
             </div>
 
             {/* Suggestions dropdown */}
             {showSuggestions && suggestions.length > 0 && (
-              <div className="absolute w-full mt-1 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg z-10 max-h-60 overflow-y-auto">
-                {suggestions.map((suggestion, index) => (
-                  <button
-                    key={index}
-                    className="w-full px-4 py-2 text-left hover:bg-gray-100 dark:hover:bg-gray-700 dark:text-white flex items-center justify-between"
-                    onClick={() => {
-                      setSelectedKeywords([...selectedKeywords, suggestion.keyword]);
-                      setInputValue('');
-                      onSearch([...selectedKeywords, suggestion.keyword].join(' '));
-                      setShowSuggestions(false);
-                    }}
-                  >
-                    <span>{suggestion.keyword}</span>
-                    <span className="text-sm text-gray-500 dark:text-gray-400">({suggestion.count})</span>
-                  </button>
-                ))}
+              <div className="absolute z-10 w-full mt-1 bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700">
+                <ul className="py-1">
+                  {suggestions.map((suggestion) => (
+                    <li
+                      key={suggestion._id}
+                      className="px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer text-gray-900 dark:text-gray-100 flex items-center justify-between"
+                      onClick={() => addKeyword(suggestion.value)}
+                    >
+                      <span>{suggestion.value}</span>
+                      <span className="text-sm text-gray-500 dark:text-gray-400">({suggestion.count})</span>
+                    </li>
+                  ))}
+                </ul>
               </div>
             )}
           </div>
 
-          {/* Dark mode toggle */}
-          <button
-            onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
-            className="ml-4 p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-            aria-label="Toggle dark mode"
-          >
-            {theme === 'dark' ? (
-              <SunIcon className="h-5 w-5 text-gray-400 dark:text-gray-300" />
-            ) : (
-              <MoonIcon className="h-5 w-5 text-gray-400" />
-            )}
-          </button>
+          <div className="flex items-center gap-2">
+            {/* Dark mode toggle */}
+            <button
+              onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+              className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+              aria-label="Toggle dark mode"
+            >
+              {theme === 'dark' ? (
+                <SunIcon className="h-5 w-5 text-gray-400 dark:text-gray-300" />
+              ) : (
+                <MoonIcon className="h-5 w-5 text-gray-400" />
+              )}
+            </button>
+
+            {/* Sign out button */}
+            <button
+              onClick={handleSignOut}
+              className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-full"
+              title="Sign out"
+            >
+              <ArrowRightOnRectangleIcon className="h-5 w-5 text-gray-500 dark:text-gray-400" />
+            </button>
+          </div>
         </div>
       </div>
     </div>

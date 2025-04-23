@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import connectDB from '@/lib/mongodb';
 import File from '@/models/File';
+import Keyword from '@/models/Keyword';
+import mongoose from 'mongoose';
 
 export async function GET(request: NextRequest) {
   try {
@@ -16,8 +18,17 @@ export async function GET(request: NextRequest) {
 
     await connectDB();
 
+    // First, ensure the Keyword model is registered
+    if (!mongoose.models.Keyword) {
+      await import('@/models/Keyword');
+    }
+
     const files = await File.find({ folderPath: path })
-      .select('filename path thumbnailPath keywords')
+      .populate({
+        path: 'keywords',
+        model: 'Keyword',
+        select: 'value'
+      })
       .sort({ filename: 1 });
 
     return NextResponse.json(files);

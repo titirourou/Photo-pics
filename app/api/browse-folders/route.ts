@@ -3,13 +3,13 @@ import { readdir } from 'fs/promises';
 import { join, basename } from 'path';
 import os from 'os';
 
-const getDefaultStartPath = () => {
-  const platform = process.platform;
-  if (platform === 'win32') {
-    return 'C:\\';
-  } else {
-    return '/';
-  }
+const getGoogleDrivePath = () => {
+  const homeDir = os.homedir();
+  return join(homeDir, 'Library/CloudStorage/GoogleDrive-trousseau@chalktalksports.com/My Drive');
+};
+
+const isGoogleDrivePath = (path: string): boolean => {
+  return path.includes('Library/CloudStorage/GoogleDrive') && path.includes('My Drive');
 };
 
 export async function GET(request: NextRequest) {
@@ -17,16 +17,25 @@ export async function GET(request: NextRequest) {
     const searchParams = request.nextUrl.searchParams;
     let path = searchParams.get('path') || '';
 
-    // If no path provided, start from root or home directory
+    // If no path provided, start from Google Drive My Drive
     if (!path) {
-      path = getDefaultStartPath();
+      path = getGoogleDrivePath();
+    }
+
+    // Only allow browsing within Google Drive My Drive
+    if (!isGoogleDrivePath(path)) {
+      return NextResponse.json([{
+        name: 'My Drive',
+        path: getGoogleDrivePath(),
+        isDirectory: true,
+      }]);
     }
 
     const entries = await readdir(path, { withFileTypes: true });
     
-    // Filter out hidden files and get directory information
+    // Filter and get directory information
     const folders = entries
-      .filter(entry => !entry.name.startsWith('.')) // Skip hidden files
+      .filter(entry => !entry.name.startsWith('.')) // Filter out hidden files
       .map(entry => ({
         name: entry.name,
         path: join(path, entry.name),

@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { readFile } from 'fs/promises';
 import { join } from 'path';
-import sharp from 'sharp';
+import File from '@/models/File';
+import connectDB from '@/lib/mongodb';
 
 export async function GET(request: NextRequest) {
   try {
@@ -15,31 +16,31 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const filePath = join(process.env.PHOTOS_ROOT || '', path);
-    const buffer = await readFile(filePath);
-
-    // If the path already points to a thumbnail, serve it directly
-    if (path.includes('thumbnails/')) {
-      return new NextResponse(buffer, {
-        headers: {
-          'Content-Type': 'image/jpeg',
-          'Cache-Control': 'public, max-age=31536000',
-        },
-      });
+    // Connect to the database to get the file info
+    await connectDB();
+    const file = await File.findOne({ path });
+    
+    if (!file) {
+      return NextResponse.json(
+        { error: 'File not found' },
+        { status: 404 }
+      );
     }
 
-    // Otherwise, generate a thumbnail on the fly
-    const thumbnail = await sharp(buffer)
-      .resize(300, 300, {
-        fit: 'cover',
-        position: 'attention'
-      })
-      .jpeg({ quality: 80 })
-      .toBuffer();
+    // Use the original file path
+    const filePath = join(process.env.PHOTOS_ROOT || '', file.path);
+    const buffer = await readFile(filePath);
 
-    return new NextResponse(thumbnail, {
+    // Determine content type based on file extension
+    const contentType = file.path.toLowerCase().endsWith('.png') 
+      ? 'image/png' 
+      : file.path.toLowerCase().endsWith('.gif')
+      ? 'image/gif'
+      : 'image/jpeg';
+
+    return new NextResponse(buffer, {
       headers: {
-        'Content-Type': 'image/jpeg',
+        'Content-Type': contentType,
         'Cache-Control': 'public, max-age=31536000',
       },
     });

@@ -1,13 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
 import connectDB from '@/lib/mongodb';
 import File from '@/models/File';
+import Keyword from '@/models/Keyword';
+import mongoose from 'mongoose';
 
 export async function GET(request: NextRequest) {
   try {
     const searchParams = request.nextUrl.searchParams;
-    const keyword = searchParams.get('keyword');
+    const searchQuery = searchParams.get('keyword');
 
-    if (!keyword) {
+    if (!searchQuery) {
       return NextResponse.json(
         { error: 'Keyword parameter is required' },
         { status: 400 }
@@ -16,22 +18,33 @@ export async function GET(request: NextRequest) {
 
     await connectDB();
 
+    // Ensure Keyword model is registered
+    if (!mongoose.models.Keyword) {
+      await import('@/models/Keyword');
+    }
+
     // Split the search query into individual keywords and trim whitespace
-    const keywords = keyword.split(' ').filter(k => k.trim());
+    const searchTerms = searchQuery.toLowerCase().split(' ').filter(k => k.trim());
 
-    // Create an array of conditions for each keyword
-    const conditions = keywords.map(k => ({
-      keywords: {
-        $regex: k,
-        $options: 'i'
+    // Find keyword documents that match the search terms
+    const keywordDocs = await Keyword.find({
+      value: {
+        $in: searchTerms.map(term => new RegExp(term, 'i'))
       }
-    }));
+    });
 
-    // Use $and to match all conditions
+    // Get the IDs of matching keywords
+    const keywordIds = keywordDocs.map(doc => doc._id);
+
+    // Find files that have any of these keywords (global search)
     const files = await File.find({
-      $and: conditions
+      keywords: { $in: keywordIds }
     })
-      .select('filename path thumbnailPath keywords')
+      .populate({
+        path: 'keywords',
+        model: 'Keyword',
+        select: 'value'
+      })
       .sort({ filename: 1 });
 
     return NextResponse.json(files);

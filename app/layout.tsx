@@ -1,13 +1,13 @@
 import './globals.css'
 import type { Metadata } from 'next'
 import { Inter } from 'next/font/google'
-import { ThemeProvider } from 'next-themes'
+import { Providers } from './providers'
 
 const inter = Inter({ subsets: ['latin'] })
 
 export const metadata: Metadata = {
   title: 'PHOTO-KEY',
-  description: 'Photo Management System',
+  description: 'Photo library management system',
 }
 
 export default function RootLayout({
@@ -18,11 +18,11 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <body className={inter.className}>
-        <ThemeProvider attribute="class">
+        <Providers>
           <div className="min-h-screen bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100">
             {children}
           </div>
-        </ThemeProvider>
+        </Providers>
       </body>
     </html>
   )
