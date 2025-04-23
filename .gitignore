@@ -44,12 +44,14 @@ yarn-error.log*
 *.tiff
 *.raw
 *.heic
+/photos/
 
 # IDE
 .idea
 .vscode
 *.swp
 *.swo
+.cursor/
 
 # Database
 /data
