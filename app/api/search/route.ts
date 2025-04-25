@@ -7,11 +7,11 @@ import mongoose from 'mongoose';
 export async function GET(request: NextRequest) {
   try {
     const searchParams = request.nextUrl.searchParams;
-    const searchQuery = searchParams.get('keyword');
+    const keywords = searchParams.getAll('keyword');
 
-    if (!searchQuery) {
+    if (!keywords.length) {
       return NextResponse.json(
-        { error: 'Keyword parameter is required' },
+        { error: 'At least one keyword parameter is required' },
         { status: 400 }
       );
     }
@@ -23,22 +23,63 @@ export async function GET(request: NextRequest) {
       await import('@/models/Keyword');
     }
 
-    // Split the search query into individual keywords and trim whitespace
-    const searchTerms = searchQuery.toLowerCase().split(' ').filter(k => k.trim());
-
-    // Find keyword documents that match the search terms
-    const keywordDocs = await Keyword.find({
-      value: {
-        $in: searchTerms.map(term => new RegExp(term, 'i'))
-      }
+    // Split keywords by quotes to handle multi-word keywords
+    const searchTerms = keywords.flatMap(keyword => {
+      // Extract quoted phrases and individual words
+      const matches = keyword.match(/"([^"]+)"|([^"\s]+)/g) || [];
+      return matches.map(term => {
+        // Remove quotes and trim
+        return term.replace(/^"(.*)"$/, '$1').toLowerCase().trim();
+      }).filter(term => term.length > 0);
     });
 
-    // Get the IDs of matching keywords
-    const keywordIds = keywordDocs.map(doc => doc._id);
+    console.log('Search terms:', searchTerms);
 
-    // Find files that have any of these keywords (global search)
+    // First try exact matches for each term
+    const exactMatches = await Keyword.find({
+      value: { $in: searchTerms }
+    });
+
+    console.log('Exact matches found:', exactMatches.map(k => k.value));
+
+    // If we found exact matches, find files that contain ALL the matched keywords
+    if (exactMatches.length > 0) {
+      const files = await File.find({
+        keywords: { 
+          $all: exactMatches.map(k => k._id) // Require ALL keywords to be present
+        }
+      })
+        .populate({
+          path: 'keywords',
+          model: 'Keyword',
+          select: 'value'
+        })
+        .sort({ filename: 1 });
+
+      console.log('Found files with exact matches:', files.length);
+      
+      if (files.length > 0) {
+        return NextResponse.json(files);
+      }
+    }
+
+    // If no exact matches or no files found, try case-insensitive regex matches
+    const regexPromises = searchTerms.map(term => 
+      Keyword.find({
+        value: new RegExp(term, 'i')
+      })
+    );
+
+    const regexResults = await Promise.all(regexPromises);
+    const matchedKeywords = regexResults.flat();
+
+    console.log('Regex matches found:', matchedKeywords.map(k => k.value));
+
+    // Find files that match ALL of the keywords (AND operation)
     const files = await File.find({
-      keywords: { $in: keywordIds }
+      keywords: { 
+        $all: matchedKeywords.map(k => k._id) 
+      }
     })
       .populate({
         path: 'keywords',
@@ -47,7 +88,9 @@ export async function GET(request: NextRequest) {
       })
       .sort({ filename: 1 });
 
+    console.log('Found files:', files.length);
     return NextResponse.json(files);
+
   } catch (error) {
     console.error('Error in GET /api/search:', error);
     return NextResponse.json(

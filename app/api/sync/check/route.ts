@@ -59,58 +59,68 @@ async function generateThumbnail(sourcePath: string, filename: string): Promise<
 }
 
 async function processDirectory(dirPath: string, isExternal: boolean = false, subfolderPath: string = '') {
-  const entries = await readdir(dirPath, { withFileTypes: true });
-  const relativePath = isExternal ? subfolderPath : relative(PHOTOS_ROOT, dirPath);
+  try {
+    console.log('Processing directory:', dirPath);
+    const entries = await readdir(dirPath, { withFileTypes: true });
+    const relativePath = isExternal ? subfolderPath : relative(PHOTOS_ROOT, dirPath);
 
-  // Only create folder entry if it's not the root directory
-  if (relativePath) {
-    const pathParts = relativePath.split('/');
-    const name = pathParts[pathParts.length - 1];
-    const parentPath = pathParts.length > 1 ? pathParts.slice(0, -1).join('/') : '/';
+    // Only create folder entry if it's not the root directory
+    if (relativePath) {
+      const pathParts = relativePath.split('/');
+      const name = pathParts[pathParts.length - 1];
+      const parentPath = pathParts.length > 1 ? pathParts.slice(0, -1).join('/') : '/';
 
-    // Create or update the folder
-    await Folder.findOneAndUpdate(
-      { path: relativePath },
-      {
-        name: name,
-        parentPath: parentPath,
-      },
-      { upsert: true }
-    );
-  }
+      // Create or update the folder
+      await Folder.findOneAndUpdate(
+        { path: relativePath },
+        {
+          name: name,
+          parentPath: parentPath,
+        },
+        { upsert: true }
+      );
+    }
 
-  for (const entry of entries) {
-    const fullPath = join(dirPath, entry.name);
-    
-    if (entry.isDirectory() && entry.name !== 'thumbnails') {
-      const newSubfolderPath = isExternal
-        ? (subfolderPath ? join(subfolderPath, entry.name) : entry.name)
-        : relative(PHOTOS_ROOT, fullPath);
+    for (const entry of entries) {
+      const fullPath = join(dirPath, entry.name);
       
-      await processDirectory(fullPath, isExternal, newSubfolderPath);
-    } else if (entry.isFile() && await isValidImageFile(entry.name)) {
-      const stats = await stat(fullPath);
-      const filePath = isExternal ? fullPath : relative(PHOTOS_ROOT, fullPath);
-      
-      // Only generate thumbnail and update database if file is not already in database
-      // or if file size has changed
-      const existingFile = await File.findOne({ path: filePath });
-      if (!existingFile || existingFile.size !== stats.size) {
-        const thumbnailPath = await generateThumbnail(fullPath, entry.name);
+      if (entry.isDirectory() && entry.name !== 'thumbnails') {
+        const newSubfolderPath = isExternal
+          ? (subfolderPath ? join(subfolderPath, entry.name) : entry.name)
+          : relative(PHOTOS_ROOT, fullPath);
+        
+        await processDirectory(fullPath, isExternal, newSubfolderPath);
+      } else if (entry.isFile() && await isValidImageFile(entry.name)) {
+        const stats = await stat(fullPath);
+        const filePath = isExternal ? fullPath : relative(PHOTOS_ROOT, fullPath);
+        
+        // Only generate thumbnail and update database if file is not already in database
+        // or if file size has changed
+        const existingFile = await File.findOne({ path: filePath });
+        if (!existingFile || existingFile.size !== stats.size) {
+          const thumbnailPath = await generateThumbnail(fullPath, entry.name);
 
-        await File.findOneAndUpdate(
-          { path: filePath },
-          {
-            filename: entry.name,
-            folderPath: relativePath,
-            size: stats.size,
-            extension: extname(entry.name).slice(1).toLowerCase(),
-            thumbnailPath,
-          },
-          { upsert: true }
-        );
+          await File.findOneAndUpdate(
+            { path: filePath },
+            {
+              filename: entry.name,
+              folderPath: relativePath,
+              size: stats.size,
+              extension: extname(entry.name).slice(1).toLowerCase(),
+              thumbnailPath,
+            },
+            { upsert: true }
+          );
+        }
       }
     }
+  } catch (error: any) {
+    if (error.code === 'EPERM') {
+      console.error(`Permission denied accessing directory: ${dirPath}`);
+      console.error('Please ensure the application has proper permissions to access Google Drive.');
+      throw new Error(`Permission denied accessing directory: ${dirPath}. Please ensure Google Drive is properly mounted and accessible.`);
+    }
+    throw error;
   }
 }
 
@@ -136,6 +146,33 @@ async function cleanupDuplicateFolders() {
 
 export async function GET(request: NextRequest) {
   try {
+    if (!PHOTOS_ROOT) {
+      console.error('PHOTOS_ROOT environment variable is not set');
+      return NextResponse.json(
+        { error: 'PHOTOS_ROOT environment variable is not set' },
+        { status: 500 }
+      );
+    }
+
+    // Check if PHOTOS_ROOT exists and is accessible
+    try {
+      await stat(PHOTOS_ROOT);
+    } catch (error: any) {
+      console.error('Error accessing PHOTOS_ROOT:', error);
+      if (error.code === 'ENOENT') {
+        return NextResponse.json(
+          { error: 'PHOTOS_ROOT directory does not exist' },
+          { status: 500 }
+        );
+      } else if (error.code === 'EPERM') {
+        return NextResponse.json(
+          { error: 'Permission denied accessing PHOTOS_ROOT. Please ensure Google Drive is properly mounted and accessible.' },
+          { status: 403 }
+        );
+      }
+      throw error;
+    }
+
     await connectDB();
 
     // First, clean up any duplicate folders
@@ -145,10 +182,19 @@ export async function GET(request: NextRequest) {
     await processDirectory(PHOTOS_ROOT);
 
     return NextResponse.json({ success: true });
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error in sync check:', error);
+    
+    // Handle specific error types
+    if (error.code === 'EPERM') {
+      return NextResponse.json(
+        { error: 'Permission denied. Please ensure Google Drive is properly mounted and accessible.' },
+        { status: 403 }
+      );
+    }
+    
     return NextResponse.json(
-      { error: 'Failed to sync changes' },
+      { error: error.message || 'Failed to sync changes' },
       { status: 500 }
     );
   }

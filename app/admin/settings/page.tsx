@@ -18,8 +18,6 @@ import { Input } from '@/components/ui/input';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useSearchStore } from '@/lib/store';
 import SyncDialog from '@/components/SyncDialog';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 
 interface KeywordStats {
   totalKeywords: number;
@@ -160,24 +158,6 @@ export default function AdminSettings() {
   const handleSearchKeyword = (keyword: string) => {
     setPendingSearch(keyword);
     router.push('/admin');
-  };
-
-  const handleCleanup = async () => {
-    try {
-      const response = await fetch('/api/settings/cleanup', {
-        method: 'POST'
-      });
-      
-      if (!response.ok) {
-        throw new Error('Failed to clean up data');
-      }
-
-      // Reload the page after successful cleanup
-      window.location.reload();
-    } catch (error) {
-      console.error('Error during cleanup:', error);
-      alert('Failed to clean up data. Please try again.');
-    }
   };
 
   return (
@@ -362,56 +342,6 @@ export default function AdminSettings() {
           selectedFolder={null}
         />
       )}
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Data Management</CardTitle>
-          <CardDescription>
-            Manage application data and cleanup options
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-4">
-            <div>
-              <h3 className="text-lg font-medium mb-2">Clean All Data</h3>
-              <div className="text-sm text-gray-500 dark:text-gray-400 mb-4">
-                <p className="mb-2">This will remove all data from the application, including:</p>
-                <ul className="list-disc list-inside space-y-1">
-                  <li>All folder records</li>
-                  <li>All file records</li>
-                  <li>All keywords</li>
-                  <li>Thumbnail cache</li>
-                </ul>
-              </div>
-              
-              <AlertDialog>
-                <AlertDialogTrigger asChild>
-                  <Button variant="destructive">
-                    Clean All Data
-                  </Button>
-                </AlertDialogTrigger>
-                <AlertDialogContent>
-                  <AlertDialogHeader>
-                    <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
-                    <AlertDialogDescription>
-                      This action will permanently delete all application data. This includes all folder records, file records, keywords, and thumbnail cache. This action cannot be undone.
-                    </AlertDialogDescription>
-                  </AlertDialogHeader>
-                  <AlertDialogFooter>
-                    <AlertDialogCancel>Cancel</AlertDialogCancel>
-                    <AlertDialogAction
-                      onClick={handleCleanup}
-                      className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                    >
-                      Yes, Clean All Data
-                    </AlertDialogAction>
-                  </AlertDialogFooter>
-                </AlertDialogContent>
-              </AlertDialog>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
     </div>
   );
 } 

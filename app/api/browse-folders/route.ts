@@ -1,56 +1,58 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { readdir } from 'fs/promises';
 import { join, basename } from 'path';
-import os from 'os';
 
-const getGoogleDrivePath = () => {
-  const homeDir = os.homedir();
-  return join(homeDir, 'Library/CloudStorage/GoogleDrive-trousseau@chalktalksports.com/My Drive');
-};
+const PHOTOS_ROOT = process.env.PHOTOS_ROOT || '';
 
-const isGoogleDrivePath = (path: string): boolean => {
-  return path.includes('Library/CloudStorage/GoogleDrive') && path.includes('My Drive');
+const isValidPath = (path: string): boolean => {
+  // Check if the path is within PHOTOS_ROOT to prevent directory traversal
+  return path.startsWith(PHOTOS_ROOT);
 };
 
 export async function GET(request: NextRequest) {
   try {
+    if (!PHOTOS_ROOT) {
+      return NextResponse.json(
+        { error: 'PHOTOS_ROOT environment variable is not set' },
+        { status: 500 }
+      );
+    }
+
     const searchParams = request.nextUrl.searchParams;
     let path = searchParams.get('path') || '';
 
-    // If no path provided, start from Google Drive My Drive
-    if (!path) {
-      path = getGoogleDrivePath();
-    }
-
-    // Only allow browsing within Google Drive My Drive
-    if (!isGoogleDrivePath(path)) {
-      return NextResponse.json([{
-        name: 'My Drive',
-        path: getGoogleDrivePath(),
-        isDirectory: true,
-      }]);
+    // If no path provided or invalid path, start from PHOTOS_ROOT
+    if (!path || !isValidPath(path)) {
+      path = PHOTOS_ROOT;
     }
 
     const entries = await readdir(path, { withFileTypes: true });
     
     // Filter and get directory information
     const folders = entries
-      .filter(entry => !entry.name.startsWith('.')) // Filter out hidden files
+      .filter(entry => 
+        // Only show directories
+        entry.isDirectory() &&
+        // Exclude hidden files and the thumbnails folder
+        !entry.name.startsWith('.') && 
+        entry.name.toLowerCase() !== 'thumbnails'
+      )
       .map(entry => ({
         name: entry.name,
         path: join(path, entry.name),
-        isDirectory: entry.isDirectory(),
+        isDirectory: true,
       }))
-      .sort((a, b) => {
-        // Directories first, then alphabetically
-        if (a.isDirectory && !b.isDirectory) return -1;
-        if (!a.isDirectory && b.isDirectory) return 1;
-        return a.name.localeCompare(b.name);
-      });
+      .sort((a, b) => a.name.localeCompare(b.name));
 
     return NextResponse.json(folders);
   } catch (error) {
     console.error('Error in GET /api/browse-folders:', error);
+    if ((error as any).code === 'EPERM') {
+      return NextResponse.json(
+        { error: 'Permission denied. Please ensure the photos directory is accessible.' },
+        { status: 403 }
+      );
+    }
     return NextResponse.json(
       { error: 'Failed to read directory' },
       { status: 500 }

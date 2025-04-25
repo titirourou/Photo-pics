@@ -67,8 +67,16 @@ export default function TopBar({ searchQuery, onSearch, selectedFolder, isUserVi
   };
 
   const addKeyword = (keyword: string) => {
-    if (!selectedKeywords.includes(keyword)) {
-      const newKeywords = [...selectedKeywords, keyword];
+    const processedKeyword = keyword.trim();
+    if (!processedKeyword) return;
+
+    // If the keyword contains spaces and isn't already quoted, wrap it in quotes
+    const formattedKeyword = processedKeyword.includes(' ') && !processedKeyword.startsWith('"') 
+      ? `"${processedKeyword}"`
+      : processedKeyword;
+
+    if (!selectedKeywords.includes(formattedKeyword)) {
+      const newKeywords = [...selectedKeywords, formattedKeyword];
       setSelectedKeywords(newKeywords);
       onSearch(newKeywords.join(' '));
       setInputValue('');
@@ -91,7 +99,18 @@ export default function TopBar({ searchQuery, onSearch, selectedFolder, isUserVi
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && inputValue.trim()) {
-      addKeyword(inputValue.trim());
+      // If the input contains a quote, make sure it's properly closed
+      let processedInput = inputValue.trim();
+      const quoteCount = (processedInput.match(/"/g) || []).length;
+      
+      if (quoteCount === 1) {
+        // If there's only one quote, add the closing quote
+        processedInput = processedInput.startsWith('"') 
+          ? `${processedInput}"`
+          : `"${processedInput}"`;
+      }
+      
+      addKeyword(processedInput);
     }
   };
 
@@ -122,7 +141,7 @@ export default function TopBar({ searchQuery, onSearch, selectedFolder, isUserVi
                   key={index}
                   className="inline-flex items-center gap-1 px-2 py-1 bg-primary/10 text-primary dark:bg-primary/20 rounded-full text-sm"
                 >
-                  {keyword}
+                  {keyword.startsWith('"') ? keyword.slice(1, -1) : keyword}
                   <button
                     onClick={() => removeKeyword(keyword)}
                     className="hover:bg-primary/20 dark:hover:bg-primary/30 rounded-full p-0.5"
@@ -164,10 +183,17 @@ export default function TopBar({ searchQuery, onSearch, selectedFolder, isUserVi
                   {suggestions.map((suggestion) => (
                     <li
                       key={suggestion._id}
-                      className="px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer text-gray-900 dark:text-gray-100 flex items-center justify-between"
+                      className="px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer text-gray-900 dark:text-gray-100 flex items-center justify-between group"
                       onClick={() => addKeyword(suggestion.value)}
                     >
-                      <span>{suggestion.value}</span>
+                      <span className="flex items-center gap-2">
+                        <span>{suggestion.value}</span>
+                        {suggestion.value.includes(' ') && (
+                          <span className="text-xs text-gray-500 dark:text-gray-400 opacity-0 group-hover:opacity-100">
+                            (multi-word)
+                          </span>
+                        )}
+                      </span>
                       <span className="text-sm text-gray-500 dark:text-gray-400">({suggestion.count})</span>
                     </li>
                   ))}

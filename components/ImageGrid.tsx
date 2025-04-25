@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import Image from 'next/image';
-import { PlusIcon, XMarkIcon, ChevronLeftIcon, ChevronRightIcon, ArrowDownTrayIcon } from '@heroicons/react/24/outline';
+import { PlusIcon, XMarkIcon, ChevronLeftIcon, ChevronRightIcon, ArrowDownTrayIcon, FolderIcon } from '@heroicons/react/24/outline';
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -181,6 +181,23 @@ export default function ImageGrid({
     return (
       <div className="flex items-center justify-center h-full">
         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+      </div>
+    );
+  }
+
+  // Show welcome message when no folder is selected and no search query
+  if (!selectedFolder && !searchQuery) {
+    return (
+      <div className="flex flex-col items-center justify-center h-full text-center px-4">
+        <div className="bg-primary/10 rounded-full p-4 mb-6">
+          <FolderIcon className="w-8 h-8 text-primary" />
+        </div>
+        <h2 className="text-2xl font-semibold text-gray-900 dark:text-white mb-3">
+          Welcome to PHOTO-KEY
+        </h2>
+        <p className="text-gray-600 dark:text-gray-400 max-w-md">
+          Select a folder from the sidebar to view its photos, or use the search bar above to find specific photos by keywords.
+        </p>
       </div>
     );
   }
